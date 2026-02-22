@@ -9,6 +9,10 @@ import {
 import { demoGenome } from "@/lib/mocks/demoGenome";
 import type { GenomeData, PrimerDesignResponseUI } from "@/types";
 import { useViewStore } from "@/store/useViewStore";
+import {
+    getInvalidStep1TemplateSequenceChar,
+    normalizeStep1TemplateSequence,
+} from "../src/lib/parsers/step1TemplateSequence";
 import Step1TemplateEssential from "@/components/steps/Step1TemplateEssential";
 import Step2PrimerProperties from "@/components/steps/Step2PrimerProperties";
 import Step3BindingLocation from "@/components/steps/Step3BindingLocation";
@@ -56,13 +60,61 @@ export default function Home() {
     const [isLoading, setIsLoading] = useState(false);
     const [apiResult, setApiResult] = useState<PrimerDesignResponseUI | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [step1WarningMessage, setStep1WarningMessage] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const totalSteps = steps.length;
     const handleStepChange = (next: number) => {
         const clamped = Math.min(Math.max(next, 1), totalSteps) as 1 | 2 | 3 | 4;
         setStep(clamped);
     };
-    const handleNext = () => handleStepChange(step + 1);
+    const clearStep1Warning = () => {
+        if (step1WarningMessage) {
+            setStep1WarningMessage(null);
+        }
+    };
+
+    const reportStep1ValidationMessage = (
+        mode: "step-transition" | "generate",
+        message: string | null,
+    ) => {
+        // Step 전환 검증은 Step1 인라인 경고를 사용하고,
+        // Generate 직전 검증은 하단 error banner를 사용해 중복 노출을 피한다.
+        if (mode === "step-transition") {
+            setStep1WarningMessage(message);
+            return;
+        }
+        setErrorMessage(message);
+    };
+
+    const validateStep1Sequence = (mode: "step-transition" | "generate") => {
+        const rawInputSequence = sequenceInputRef.current;
+        const normalizedSequence = normalizeStep1TemplateSequence(rawInputSequence);
+        const invalidChar = getInvalidStep1TemplateSequenceChar(rawInputSequence);
+        if (!invalidChar) {
+            if (mode === "generate" && rawInputSequence.trim().length > 0 && !normalizedSequence) {
+                // Generate 직전 검증: 입력이 있었는데 정규화 후 빈 문자열이면 요청 중단.
+                const warningMessage =
+                    "전송할 수 있는 유효한 염기서열이 없습니다. A, T, G, C 문자만 입력해 주세요.";
+                reportStep1ValidationMessage(mode, warningMessage);
+                return { isValid: false, normalizedSequence };
+            }
+
+            // 단계 이동 검증: Step1 경고를 초기화하고 다음 동작 진행.
+            reportStep1ValidationMessage(mode, null);
+            return { isValid: true, normalizedSequence };
+        }
+
+        const warningMessage = `대소문자 구분 없이 A, T, G, C만 입력 가능합니다. 잘못된 문자를 제거해 주세요.`;
+        reportStep1ValidationMessage(mode, warningMessage);
+        return { isValid: false, normalizedSequence };
+    };
+    const handleNext = () => {
+        if (step === 1 && !validateStep1Sequence("step-transition").isValid) {
+            return;
+        }
+
+        handleStepChange(step + 1);
+    };
     const handleBack = () => handleStepChange(step - 1);
     const isLastStep = step === totalSteps;
 
@@ -74,11 +126,16 @@ export default function Home() {
     );
 
     const handleGenerate = async () => {
-        const inputSequence = sequenceInputRef.current;
+        const validation = validateStep1Sequence("generate");
+        if (!validation.isValid) {
+            return;
+        }
+
         const targetSeq =
-            inputSequence && inputSequence.trim().length > 0
-                ? inputSequence.trim()
+            validation.normalizedSequence && validation.normalizedSequence.trim().length > 0
+                ? validation.normalizedSequence.trim()
                 : "ATGCGTACGTAGCTAGCTAGCTAGCTAATGCGTACGTAGCTAGCTAGCTAGCTA";
+
         const payload: AnalyzeRequestInput = {
             target_sequence: targetSeq,
             species: "Homo sapiens",
@@ -122,7 +179,6 @@ export default function Home() {
             setIsModalOpen(false);
             // Surface the error for visibility during development.
             console.error("Generate Primers failed", error);
-            alert(message);
         } finally {
             setIsLoading(false);
         }
@@ -149,6 +205,8 @@ export default function Home() {
                 {step === 1 && (
                     <Step1TemplateEssential
                         sequenceRef={sequenceInputRef}
+                        validationMessage={step1WarningMessage}
+                        onSequenceChange={clearStep1Warning}
                     />
                 )}
 
