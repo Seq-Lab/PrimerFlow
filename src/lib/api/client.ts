@@ -1,6 +1,6 @@
 import axios from "axios";
 
-const DEFAULT_API_BASE_URL = "https://primerflow-be.onrender.com";
+const DEFAULT_API_BASE_URL = "/api";
 const apiBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || DEFAULT_API_BASE_URL;
 
