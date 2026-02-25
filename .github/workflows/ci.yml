@@ -42,3 +42,5 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          BACKEND_URL: ${{ github.base_ref == 'main' && secrets.BACKEND_URL_PRODUCTION || secrets.BACKEND_URL_STAGING }}
