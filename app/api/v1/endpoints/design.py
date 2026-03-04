@@ -1,9 +1,9 @@
-import time
 import os
+import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, status
 import pysam
+from fastapi import APIRouter, HTTPException, status
 
 from app.algorithms.PrimerDesigner import PrimerDesigner
 from app.schemas.request import PrimerDesignRequest
