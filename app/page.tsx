@@ -83,6 +83,7 @@ export default function Home() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [step1WarningMessage, setStep1WarningMessage] = useState<string | null>(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [restrictionEnzymes, setRestrictionEnzymes] = useState<string[]>([]);
     const totalSteps = steps.length;
     const handleStepChange = (next: number) => {
         const clamped = Math.min(Math.max(next, 1), totalSteps) as 1 | 2 | 3 | 4;
@@ -180,6 +181,7 @@ export default function Home() {
             end_mismatch_region_size: 5,
             end_mismatch_min_mismatch: 1,
             search_start: 1,
+            restriction_enzymes: restrictionEnzymes,
         };
 
         setIsLoading(true);
@@ -233,7 +235,12 @@ export default function Home() {
 
                 {step === 2 && <Step2PrimerProperties />}
 
-                {step === 3 && <Step3BindingLocation />}
+                {step === 3 && (
+                    <Step3BindingLocation
+                        restrictionEnzymes={restrictionEnzymes}
+                        onRestrictionEnzymesChange={setRestrictionEnzymes}
+                    />
+                )}
 
                 {step === 4 && (
                     <Step4SpecificityPreview
