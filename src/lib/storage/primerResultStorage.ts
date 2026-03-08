@@ -42,7 +42,7 @@ export const loadPrimerResultFromStorage = (
     const apiResult = parsedValue.apiResult;
     if (!isRecord(apiResult)) return null;
 
-    return apiResult as PrimerDesignResponseUI;
+    return apiResult as unknown as PrimerDesignResponseUI;
   } catch {
     return null;
   }
