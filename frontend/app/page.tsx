@@ -1,0 +1,275 @@
+"use client";
+
+import { useRef, useState } from "react";
+import {
+    analyzeGenome,
+    type AnalyzeRequestInput,
+} from "@/services/analysisService";
+import type { GenomeData } from "@/types";
+import { useViewStore } from "@/store/useViewStore";
+import {
+    getInvalidStep1TemplateSequenceChar,
+    normalizeStep1TemplateSequence,
+} from "../src/lib/parsers/step1TemplateSequence";
+import { savePrimerResultToStorage } from "@/lib/storage/primerResultStorage";
+import Step1TemplateEssential from "@/components/steps/Step1TemplateEssential";
+import Step2PrimerProperties from "@/components/steps/Step2PrimerProperties";
+import Step3BindingLocation from "@/components/steps/Step3BindingLocation";
+import Step4SpecificityPreview from "@/components/steps/Step4SpecificityPreview";
+import WizardFooterNav from "@/components/ui/WizardFooterNav";
+import WizardHeader from "@/components/ui/WizardHeader";
+
+const DEFAULT_PREVIEW_GENOME: GenomeData = {
+    length: 12000,
+    tracks: [
+        {
+            id: "preview-primer-candidates",
+            name: "Primer 후보군",
+            height: 28,
+            features: [
+                { id: "p-01", start: 400, end: 1200, label: "P-01", color: "#2563eb" },
+                { id: "p-02", start: 1800, end: 2600, label: "P-02", color: "#0ea5e9" },
+                { id: "p-03", start: 3200, end: 4300, label: "P-03", color: "#22c55e" },
+            ],
+        },
+        {
+            id: "preview-target-region",
+            name: "Target 구간",
+            height: 18,
+            features: [{ id: "template", start: 1500, end: 5200, label: "Template", color: "#f97316" }],
+        },
+    ],
+};
+
+export default function Home() {
+    const viewState = useViewStore((state) => state.viewState);
+    const setViewState = useViewStore((state) => state.setViewState);
+    const resetViewState = useViewStore((state) => state.resetViewState);
+
+    const minScale = 0.1;
+    const maxScale = 50;
+    const zoomStep = 1.2;
+
+    const clampScale = (scale: number) => Math.min(maxScale, Math.max(minScale, scale));
+    const handleZoomIn = () =>
+        setViewState({ ...viewState, scale: clampScale(viewState.scale * zoomStep) });
+    const handleZoomOut = () =>
+        setViewState({ ...viewState, scale: clampScale(viewState.scale / zoomStep) });
+
+    const sequenceInputRef = useRef("");
+
+    const steps = [
+        { id: 1, label: "Template & Essential" },
+        { id: 2, label: "Primer Properties" },
+        { id: 3, label: "Binding Location" },
+        { id: 4, label: "Specificity & Preview" },
+    ] as const;
+
+    const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+    const [isLoading, setIsLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [step1WarningMessage, setStep1WarningMessage] = useState<string | null>(null);
+    const [restrictionEnzymes, setRestrictionEnzymes] = useState<string[]>([]);
+    const totalSteps = steps.length;
+    const handleStepChange = (next: number) => {
+        const clamped = Math.min(Math.max(next, 1), totalSteps) as 1 | 2 | 3 | 4;
+        setStep(clamped);
+    };
+    const clearStep1Warning = () => {
+        if (step1WarningMessage) {
+            setStep1WarningMessage(null);
+        }
+    };
+
+    const reportStep1ValidationMessage = (
+        mode: "step-transition" | "generate",
+        message: string | null,
+    ) => {
+        // Step 전환 검증은 Step1 인라인 경고를 사용하고,
+        // Generate 직전 검증은 하단 error banner를 사용해 중복 노출을 피한다.
+        if (mode === "step-transition") {
+            setStep1WarningMessage(message);
+            return;
+        }
+        setErrorMessage(message);
+    };
+
+    const validateStep1Sequence = (mode: "step-transition" | "generate") => {
+        const rawInputSequence = sequenceInputRef.current;
+        const normalizedSequence = normalizeStep1TemplateSequence(rawInputSequence);
+        const invalidChar = getInvalidStep1TemplateSequenceChar(rawInputSequence);
+        if (!invalidChar) {
+            if (mode === "generate" && rawInputSequence.trim().length > 0 && !normalizedSequence) {
+                // Generate 직전 검증: 입력이 있었는데 정규화 후 빈 문자열이면 요청 중단.
+                const warningMessage =
+                    "전송할 수 있는 유효한 염기서열이 없습니다. A, T, G, C 문자만 입력해 주세요.";
+                reportStep1ValidationMessage(mode, warningMessage);
+                return { isValid: false, normalizedSequence };
+            }
+
+            // 단계 이동 검증: Step1 경고를 초기화하고 다음 동작 진행.
+            reportStep1ValidationMessage(mode, null);
+            return { isValid: true, normalizedSequence };
+        }
+
+        const warningMessage = `대소문자 구분 없이 A, T, G, C만 입력 가능합니다. 잘못된 문자를 제거해 주세요.`;
+        reportStep1ValidationMessage(mode, warningMessage);
+        return { isValid: false, normalizedSequence };
+    };
+    const handleNext = () => {
+        if (step === 1 && !validateStep1Sequence("step-transition").isValid) {
+            return;
+        }
+
+        handleStepChange(step + 1);
+    };
+    const handleBack = () => handleStepChange(step - 1);
+    const isLastStep = step === totalSteps;
+
+    const previewGenome = DEFAULT_PREVIEW_GENOME;
+    const trackCount = previewGenome.tracks.length;
+    const featureCount = previewGenome.tracks.reduce(
+        (count, track) => count + track.features.length,
+        0,
+    );
+
+    const handleGenerate = async () => {
+        const validation = validateStep1Sequence("generate");
+        if (!validation.isValid) {
+            return;
+        }
+
+        const targetSeq = validation.normalizedSequence?.trim() ?? "";
+        if (!targetSeq) {
+            setErrorMessage("템플릿 시퀀스를 입력해 주세요.");
+            return;
+        }
+
+        const payload: AnalyzeRequestInput = {
+            target_sequence: targetSeq,
+            species: "Homo sapiens",
+            analysis_type: "primer_generation",
+            product_size_min: 100,
+            product_size_max: 300,
+            tm_min: 57,
+            tm_opt: 60,
+            tm_max: 63,
+            gc_content_min: 40,
+            gc_content_max: 60,
+            max_tm_difference: 1,
+            gc_clamp: true,
+            max_poly_x: 5,
+            concentration: 50,
+            check_enabled: true,
+            splice_variant_handling: false,
+            snp_handling: false,
+            mispriming_library: false,
+            end_mismatch_region_size: 5,
+            end_mismatch_min_mismatch: 1,
+            search_start: 1,
+            restriction_enzymes: restrictionEnzymes,
+        };
+
+        let resultTab: Window | null = null;
+        if (typeof window !== "undefined") {
+            resultTab = window.open("/result", "_blank");
+            if (!resultTab) {
+                setErrorMessage(
+                    "브라우저에서 새 탭 열기를 차단했습니다. 팝업 차단 해제 후 다시 시도해 주세요.",
+                );
+                return;
+            }
+        }
+
+        setIsLoading(true);
+        setErrorMessage(null);
+
+        try {
+            const result = await analyzeGenome(payload);
+            const resultKey = savePrimerResultToStorage(result);
+            const resultUrl = `/result?resultKey=${encodeURIComponent(resultKey)}`;
+
+            if (resultTab && !resultTab.closed) {
+                resultTab.location.href = resultUrl;
+                resultTab.focus();
+            } else if (typeof window !== "undefined") {
+                window.open(resultUrl, "_blank");
+            }
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : "Failed to generate primers.";
+            setErrorMessage(message);
+            if (resultTab && !resultTab.closed) {
+                resultTab.close();
+            }
+            // Surface the error for visibility during development.
+            console.error("Generate Primers failed", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="relative min-h-screen overflow-hidden bg-[#070d18] text-slate-100">
+            <div className="pointer-events-none absolute inset-0 opacity-70">
+                <div className="absolute -left-10 -top-10 h-64 w-64 rounded-full bg-blue-600/20 blur-[120px]" />
+                <div className="absolute right-0 top-10 h-72 w-72 rounded-full bg-indigo-500/10 blur-[120px]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,#1a2542_0%,transparent_35%),radial-gradient(circle_at_80%_20%,#122040_0%,transparent_30%)]" />
+            </div>
+
+            <main className="relative mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-10 lg:px-10">
+                <WizardHeader
+                    genomeLength={previewGenome.length}
+                    trackCount={trackCount}
+                    featureCount={featureCount}
+                    steps={steps}
+                    step={step}
+                    onStepChange={handleStepChange}
+                />
+
+                {step === 1 && (
+                    <Step1TemplateEssential
+                        sequenceRef={sequenceInputRef}
+                        validationMessage={step1WarningMessage}
+                        onSequenceChange={clearStep1Warning}
+                    />
+                )}
+
+                {step === 2 && <Step2PrimerProperties />}
+
+                {step === 3 && (
+                    <Step3BindingLocation
+                        restrictionEnzymes={restrictionEnzymes}
+                        onRestrictionEnzymesChange={setRestrictionEnzymes}
+                    />
+                )}
+
+                {step === 4 && (
+                    <Step4SpecificityPreview
+                        genome={previewGenome}
+                        viewState={viewState}
+                        onViewStateChange={setViewState}
+                        onZoomIn={handleZoomIn}
+                        onZoomOut={handleZoomOut}
+                        onResetView={resetViewState}
+                    />
+                )}
+                <WizardFooterNav
+                    step={step}
+                    isLastStep={isLastStep}
+                    onBack={handleBack}
+                    onNext={handleNext}
+                    onGenerate={handleGenerate}
+                    isGenerating={isLoading}
+                />
+
+                {isLastStep && errorMessage && (
+                    <div className="mt-4 rounded bg-red-100 px-4 py-2 text-sm font-semibold text-red-700">
+                        {errorMessage}
+                    </div>
+                )}
+            </main>
+
+        </div>
+    );
+}
