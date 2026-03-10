@@ -214,7 +214,7 @@ uvicorn app.main:app --reload
 - 테스트 결과:
   - 1단계: ![week3_screenshot#1.png](frontend/docs/screenshots/week3_screenshot%231.png)
   - 2단계: ![week3_screenshot#2.png](frontend/docs/screenshots/week3_screenshot%232.png)
-  - 3단계: ![week3_screenshot#3.png](frontend/ocs/screenshots/week3_screenshot%233.png)
+  - 3단계: ![week3_screenshot#3.png](frontend/docs/screenshots/week3_screenshot%233.png)
   - 4단계: ![week3_screenshot#4.png](frontend/docs/screenshots/week3_screenshot%234.png)
 - 다음 주 계획:
   - 실제 데이터 연동, GenomeCanvas 미리보기 및 컨트롤 마무리
@@ -368,7 +368,7 @@ uvicorn app.main:app --reload
     - `health/db` 엔드포인트 신설: SQLite DB(`database/annotations.db`) 존재 여부, 읽기 권한 및 테이블 샘플 데이터 확인 로직 추가.
     - API 탐색 개선: 루트(/) 경로 접속 시 문서 및 헬스 체크 엔드포인트 링크를 반환하도록 수정.
 
-### Repobeats
+## Repobeats
 ### Frontend
 (3.1 ~ 3.10 기간의 대시보드)
 ![Alt](https://repobeats.axiom.co/api/embed/d2f58146b1988f61e92f8b0545847f2f910bbb6d.svg "Repobeats analytics image")
